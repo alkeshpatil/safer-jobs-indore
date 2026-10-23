@@ -1,0 +1,57 @@
+name: pages
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '7 * * * *'
+  workflow_dispatch:
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+concurrency:
+  group: pages
+  cancel-in-progress: false
+env:
+  EXPIRES_AT: '2026-10-30T14:30:00Z'
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      deploy: ${{ steps.go.outputs.deploy }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: go
+        run: |
+          now=$(date -u +%s); exp=$(date -u -d "$EXPIRES_AT" +%s)
+          expired=false; [ "$now" -ge "$exp" ] && expired=true
+          already=false; grep -q 'data-expired-page' index.html && already=true
+          deploy=false
+          if [ "$expired" = true ] && [ "$already" = false ]; then
+            cp expired.html index.html
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit -am "Link expired: report removed"
+            git push
+            deploy=true
+          fi
+          [ "${{ github.event_name }}" != "schedule" ] && deploy=true
+          echo "deploy=$deploy" >> "$GITHUB_OUTPUT"
+  deploy:
+    needs: check
+    if: needs.check.outputs.deploy == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/configure-pages@v5
+      - run: mkdir -p _site && cp index.html expired.html _site/
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deployment
+        uses: actions/deploy-pages@v4
